@@ -25,7 +25,7 @@ class Language(str, Enum):
     nospeech = "nospeech"
 
 
-model_dir = "iic/SenseVoiceSmall"
+model_dir = "./models/SenseVoiceSmall"
 m, kwargs = SenseVoiceSmall.from_pretrained(model=model_dir, device=os.getenv("SENSEVOICE_DEVICE", "cuda:0"))
 m.eval()
 

@@ -14,9 +14,9 @@ import torchaudio
 
 from funasr import AutoModel
 
-model = "iic/SenseVoiceSmall"
+model = "./models/SenseVoiceSmall"
 model = AutoModel(model=model,
-				  vad_model="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+				  vad_model="./models/speech_fsmn_vad_zh-cn-16k-common-pytorch",
 				  vad_kwargs={"max_single_segment_time": 30000},
 				  trust_remote_code=True,
 				  )
