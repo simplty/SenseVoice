@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.coverage
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+*.log
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README*.md
+docs/
+
+# Test files
+test/
+tests/
+*_test.py
+test_*.py
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Other
+*.mp3
+*.wav
+*.mp4
+image/
+cc_launcher.sh

@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  sensevoice-api:
+    # Build from current directory
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    # Container name
+    container_name: sensevoice-transcription-api
+    
+    # Port mapping - host:container
+    ports:
+      - "7861:7861"
+    
+    # Environment variables
+    environment:
+      # Device configuration - use 'cpu' or 'cuda:0' for GPU
+      - SENSEVOICE_DEVICE=cpu
+      # API port
+      - PORT=7861
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Volumes - uncomment if you want to mount models from host
+    # This is useful if you want to avoid copying models into the image
+    # volumes:
+    #   - ./models:/app/models:ro
+    #   - ./data:/app/data:ro
+    
+    # Resource limits (optional)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 4G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 2G
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7861/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Network
+    networks:
+      - sensevoice-net
+
+# Networks
+networks:
+  sensevoice-net:
+    driver: bridge
+
+# Volumes (optional) - for persistent data
+# volumes:
+#   models:
+#     driver: local
+#   data:
+#     driver: local
