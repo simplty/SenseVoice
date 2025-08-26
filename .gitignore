@@ -33,4 +33,5 @@ logs/
 *.log
 
 # PID file
-.sensevoice.pid
+*.pid
+Makefile

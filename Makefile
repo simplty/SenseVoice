@@ -6,14 +6,18 @@
 # Use venv Python if it exists, otherwise use system Python
 PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 API_FILE := transcriptions_api.py
+WEBUI_FILE := webui.py
 PORT := 7861
+WEBUI_PORT := 7862
 DEVICE := cpu
 LOG_DIR := logs
 LOG_FILE := $(LOG_DIR)/sensevoice_api_$(shell date +%Y%m%d_%H%M%S).log
+WEBUI_LOG_FILE := $(LOG_DIR)/sensevoice_webui_$(shell date +%Y%m%d_%H%M%S).log
 PID_FILE := .sensevoice.pid
+WEBUI_PID_FILE := .sensevoice_webui.pid
 
 # Phony targets (not actual files)
-.PHONY: run run-gpu run-docker install clean help docker-build docker-up docker-down start stop status logs tail
+.PHONY: run run-gpu run-docker install clean help docker-build docker-up docker-down start stop status logs tail webui webui-start webui-stop webui-status
 
 # Default target: Run API in background with logging
 run: start
@@ -97,6 +101,66 @@ status:
 			rm -f $(PID_FILE); \
 		fi \
 	fi
+
+# WebUI operations
+webui: webui-start
+
+# Start WebUI in background
+webui-start:
+	@mkdir -p $(LOG_DIR)
+	@if [ -f $(WEBUI_PID_FILE) ] && kill -0 `cat $(WEBUI_PID_FILE)` 2>/dev/null; then \
+		echo "SenseVoice WebUI is already running (PID: `cat $(WEBUI_PID_FILE)`)"; \
+		echo "Use 'make webui-stop' to stop it first"; \
+		exit 1; \
+	fi
+	@echo "Starting SenseVoice WebUI in background on port $(WEBUI_PORT)..."
+	@echo "Log file: $(WEBUI_LOG_FILE)"
+	@nohup sh -c 'GRADIO_SERVER_PORT=$(WEBUI_PORT) $(PYTHON) -u $(WEBUI_FILE)' > $(WEBUI_LOG_FILE) 2>&1 & echo $$! > $(WEBUI_PID_FILE)
+	@sleep 3
+	@if kill -0 `cat $(WEBUI_PID_FILE)` 2>/dev/null; then \
+		echo "✓ SenseVoice WebUI started successfully (PID: `cat $(WEBUI_PID_FILE)`)"; \
+		echo "  WebUI URL: http://localhost:$(WEBUI_PORT)"; \
+		echo "  View logs: cat $(WEBUI_LOG_FILE)"; \
+		echo "  Stop WebUI: make webui-stop"; \
+	else \
+		echo "✗ Failed to start SenseVoice WebUI. Check logs: cat $(WEBUI_LOG_FILE)"; \
+		rm -f $(WEBUI_PID_FILE); \
+		exit 1; \
+	fi
+
+# Stop the running WebUI
+webui-stop:
+	@if [ -f $(WEBUI_PID_FILE) ]; then \
+		if kill -0 `cat $(WEBUI_PID_FILE)` 2>/dev/null; then \
+			echo "Stopping SenseVoice WebUI (PID: `cat $(WEBUI_PID_FILE)`)..."; \
+			kill `cat $(WEBUI_PID_FILE)`; \
+			rm -f $(WEBUI_PID_FILE); \
+			echo "✓ SenseVoice WebUI stopped"; \
+		else \
+			echo "Process not found. Cleaning up PID file..."; \
+			rm -f $(WEBUI_PID_FILE); \
+		fi \
+	else \
+		echo "SenseVoice WebUI is not running"; \
+	fi
+
+# Check WebUI status
+webui-status:
+	@if [ -f $(WEBUI_PID_FILE) ] && kill -0 `cat $(WEBUI_PID_FILE)` 2>/dev/null; then \
+		echo "✓ SenseVoice WebUI is running (PID: `cat $(WEBUI_PID_FILE)`)"; \
+		echo "  WebUI URL: http://localhost:$(WEBUI_PORT)"; \
+		echo "  Latest log: `ls -t $(LOG_DIR)/sensevoice_webui_*.log 2>/dev/null | head -1`"; \
+	else \
+		echo "✗ SenseVoice WebUI is not running"; \
+		if [ -f $(WEBUI_PID_FILE) ]; then \
+			rm -f $(WEBUI_PID_FILE); \
+		fi \
+	fi
+
+# Run WebUI in foreground (for debugging)
+webui-fg:
+	@echo "Starting SenseVoice WebUI in foreground on port $(WEBUI_PORT)..."
+	GRADIO_SERVER_PORT=$(WEBUI_PORT) $(PYTHON) $(WEBUI_FILE)
 
 # View latest log file
 logs:
@@ -190,6 +254,7 @@ clean-logs:
 	@echo "Cleaning log files..."
 	rm -rf $(LOG_DIR)
 	rm -f $(PID_FILE)
+	rm -f $(WEBUI_PID_FILE)
 
 # Check if model files exist
 check-models:
@@ -205,13 +270,20 @@ check-models:
 help:
 	@echo "SenseVoice Makefile Commands:"
 	@echo ""
-	@echo "Background Process Management:"
+	@echo "API Background Process Management:"
 	@echo "  make              - Start API in background with CPU (default)"
 	@echo "  make start        - Same as 'make'"
 	@echo "  make start-gpu    - Start API in background with GPU"
 	@echo "  make stop         - Stop the running API"
 	@echo "  make restart      - Restart the API"
 	@echo "  make status       - Check API status"
+	@echo ""
+	@echo "WebUI Management:"
+	@echo "  make webui        - Start WebUI in background"
+	@echo "  make webui-start  - Same as 'make webui'"
+	@echo "  make webui-stop   - Stop the running WebUI"
+	@echo "  make webui-status - Check WebUI status"
+	@echo "  make webui-fg     - Run WebUI in foreground (for debugging)"
 	@echo ""
 	@echo "Log Management:"
 	@echo "  make logs         - View latest log file"
@@ -241,11 +313,18 @@ help:
 	@echo "  make help         - Show this help message"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make              # Start in background (CPU, port 7861)"
-	@echo "  make start-gpu    # Start in background with GPU"
+	@echo "  make              # Start API in background (CPU, port $(PORT))"
+	@echo "  make start-gpu    # Start API in background with GPU"
+	@echo "  make webui        # Start WebUI in background (port $(WEBUI_PORT))"
 	@echo "  make status       # Check if API is running"
-	@echo "  make tail         # Follow logs in real-time"
+	@echo "  make webui-status # Check if WebUI is running"
+	@echo "  make tail         # Follow API logs in real-time"
 	@echo "  make stop         # Stop the API"
+	@echo "  make webui-stop   # Stop the WebUI"
+	@echo ""
+	@echo "Ports:"
+	@echo "  API: $(PORT)"
+	@echo "  WebUI: $(WEBUI_PORT)"
 	@echo ""
 	@echo "Logs are saved in: $(LOG_DIR)/"
-	@echo "PID file: $(PID_FILE)"
+	@echo "PID files: $(PID_FILE), $(WEBUI_PID_FILE)"

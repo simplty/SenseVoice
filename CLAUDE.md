@@ -29,6 +29,12 @@ git push origin docker_deploy_on_cpu
 # Visit: https://github.com/simplty/SenseVoice/pull/new/docker_deploy_on_cpu
 ```
 
+### Merge Rules
+**重要**: 当将 main 分支合并到当前分支时，请遵守以下规则：
+- 千万不要擅自修改当前分支的文件
+- 如果当前分支的文件与 main 分支的文件有冲突，需要让用户自己选择如何解决冲突
+- 在合并前先通知用户可能存在的冲突，让用户决定合并策略
+
 ## Commands
 
 ### Environment Setup with uv
