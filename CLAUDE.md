@@ -12,6 +12,23 @@ SenseVoice is a speech foundation model with multiple speech understanding capab
 
 The model uses a non-autoregressive end-to-end architecture for fast inference (15x faster than Whisper-Large).
 
+## Git Configuration
+
+### Repository Information
+- Repository: simplty/SenseVoice
+- Main branch: main
+- Development branch: docker_deploy_on_cpu
+- Remote: origin configured with authentication
+
+### Common Git Commands
+```bash
+# Push to current branch
+git push origin docker_deploy_on_cpu
+
+# Create pull request
+# Visit: https://github.com/simplty/SenseVoice/pull/new/docker_deploy_on_cpu
+```
+
 ## Commands
 
 ### Environment Setup with uv
