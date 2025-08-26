@@ -27,3 +27,10 @@ GPT-SoVITS*
 modelscope_models
 examples/aishell/llm_asr_nar/*
 models/
+
+# Log files
+logs/
+*.log
+
+# PID file
+.sensevoice.pid

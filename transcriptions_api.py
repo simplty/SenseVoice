@@ -7,7 +7,10 @@ Compatible with OpenAI's Whisper API format
 
 import os
 import re
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+import logging
+import json
+from datetime import datetime
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from typing import Optional, Literal
 from io import BytesIO
@@ -15,19 +18,47 @@ import torchaudio
 from model import SenseVoiceSmall
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
 # Initialize model
 model_dir = "./models/SenseVoiceSmall"
 device = os.getenv("SENSEVOICE_DEVICE", "cpu")
-print(f"Loading model from {model_dir} on {device}...")
+logger.info(f"Loading model from {model_dir} on {device}...")
 m, kwargs = SenseVoiceSmall.from_pretrained(model=model_dir, device=device)
 m.eval()
-print("Model loaded successfully!")
+logger.info("Model loaded successfully!")
 
 app = FastAPI(
     title="SenseVoice Transcription API",
     description="OpenAI-compatible transcription API using SenseVoice model",
     version="1.0.0"
 )
+
+# Add middleware to log requests
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Middleware to log all requests and responses"""
+    start_time = datetime.now()
+    
+    # Log request info
+    logger.info(f"Request: {request.method} {request.url.path}")
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Calculate duration
+    duration = (datetime.now() - start_time).total_seconds()
+    
+    # Log response info
+    logger.info(f"Response: Status={response.status_code}, Duration={duration:.2f}s")
+    
+    return response
 
 # Clean text patterns
 regex = r"<\|.*?\|>"
@@ -92,9 +123,16 @@ async def create_transcription(
     Compatible with OpenAI's Whisper API format
     """
     try:
+        # Log request parameters
+        logger.info(f"Transcription request: filename={file.filename}, size={file.size if hasattr(file, 'size') else 'unknown'}, "
+                   f"language={language}, response_format={response_format}")
+        
         # Read audio file
         file_io = BytesIO(await file.read())
         data_or_path_or_list, audio_fs = torchaudio.load(file_io)
+        
+        # Log audio info
+        logger.info(f"Audio loaded: sample_rate={audio_fs}, shape={data_or_path_or_list.shape}")
         
         # Resample if needed
         if audio_fs != TARGET_FS:
@@ -109,6 +147,8 @@ async def create_transcription(
         if language and language.lower() in LANGUAGE_MAP:
             lang = LANGUAGE_MAP[language.lower()]
         
+        logger.info(f"Starting inference with language={lang}")
+        
         # Perform transcription
         res = m.inference(
             data_in=data_or_path_or_list.cpu().numpy(),
@@ -117,6 +157,8 @@ async def create_transcription(
             ban_emo_unk=False,
             **kwargs,
         )
+        
+        logger.info(f"Inference completed")
         
         if not res or not res[0]:
             raise HTTPException(status_code=500, detail="Transcription failed")
@@ -135,23 +177,30 @@ async def create_transcription(
         # Detect language if auto
         detected_language = detect_language_from_text(raw_text) if lang == "auto" else lang
         
+        # Log the transcription result
+        logger.info(f"Transcription result: detected_language={detected_language}, "
+                   f"text_length={len(clean_text)}, text_preview={clean_text[:100]}...")
+        
         # Format response based on response_format
         if response_format == "text":
+            logger.info(f"Returning text response: {clean_text}")
             return PlainTextResponse(content=clean_text)
         
         elif response_format == "srt":
             # Simple SRT format (without timestamps for now)
             srt_content = f"1\n00:00:00,000 --> 00:00:10,000\n{clean_text}\n"
+            logger.info(f"Returning SRT response")
             return PlainTextResponse(content=srt_content, media_type="text/plain")
         
         elif response_format == "vtt":
             # Simple VTT format (without timestamps for now)
             vtt_content = f"WEBVTT\n\n00:00:00.000 --> 00:00:10.000\n{clean_text}\n"
+            logger.info(f"Returning VTT response")
             return PlainTextResponse(content=vtt_content, media_type="text/vtt")
         
         elif response_format == "verbose_json":
             # Verbose JSON with more details
-            return JSONResponse({
+            response_data = {
                 "task": "transcribe",
                 "language": detected_language,
                 "duration": None,  # Would need to calculate from audio
@@ -168,16 +217,21 @@ async def create_transcription(
                     "compression_ratio": None,
                     "no_speech_prob": 0.0
                 }]
-            })
+            }
+            logger.info(f"Returning verbose JSON response: {json.dumps(response_data, ensure_ascii=False)[:500]}...")
+            return JSONResponse(response_data)
         
         else:  # json (default)
-            return JSONResponse({
+            response_data = {
                 "text": clean_text,
                 "language": detected_language,
                 "model": "sensevoice-small"
-            })
+            }
+            logger.info(f"Returning JSON response: {json.dumps(response_data, ensure_ascii=False)}")
+            return JSONResponse(response_data)
             
     except Exception as e:
+        logger.error(f"Transcription error: {str(e)}", exc_info=True)
         if "load" in str(e).lower() or "audio" in str(e).lower():
             raise HTTPException(status_code=400, detail="Invalid audio file format")
         raise HTTPException(status_code=500, detail=str(e))
@@ -236,4 +290,26 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 7861))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    logger.info(f"Starting SenseVoice API server on port {port}, device: {device}")
+    logger.info(f"API endpoints: http://0.0.0.0:{port}/v1/audio/transcriptions")
+    logger.info(f"Documentation: http://0.0.0.0:{port}/docs")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_config={
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            },
+        },
+        "handlers": {
+            "default": {
+                "formatter": "default",
+                "class": "logging.StreamHandler",
+                "stream": "ext://sys.stdout"
+            },
+        },
+        "root": {
+            "level": "INFO",
+            "handlers": ["default"]
+        },
+    })
