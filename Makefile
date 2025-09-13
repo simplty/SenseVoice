@@ -70,6 +70,7 @@ start-gpu:
 
 # Stop the running API
 stop:
+	@# First try to stop by PID file
 	@if [ -f $(PID_FILE) ]; then \
 		if kill -0 `cat $(PID_FILE)` 2>/dev/null; then \
 			echo "Stopping SenseVoice API (PID: `cat $(PID_FILE)`)..."; \
@@ -77,10 +78,20 @@ stop:
 			rm -f $(PID_FILE); \
 			echo "✓ SenseVoice API stopped"; \
 		else \
-			echo "Process not found. Cleaning up PID file..."; \
+			echo "Process in PID file not found. Cleaning up PID file..."; \
 			rm -f $(PID_FILE); \
 		fi \
-	else \
+	fi
+	@# Also try to find and stop by process name
+	@PIDS=`ps aux | grep "$(API_FILE)" | grep -v grep | awk '{print $$2}'`; \
+	if [ -n "$$PIDS" ]; then \
+		echo "Found running SenseVoice API processes: $$PIDS"; \
+		for pid in $$PIDS; do \
+			echo "Stopping process $$pid..."; \
+			kill $$pid 2>/dev/null || true; \
+		done; \
+		echo "✓ All SenseVoice API processes stopped"; \
+	elif [ ! -f $(PID_FILE) ]; then \
 		echo "SenseVoice API is not running"; \
 	fi
 
@@ -89,6 +100,7 @@ restart: stop start
 
 # Check API status
 status:
+	@# Check by PID file first
 	@if [ -f $(PID_FILE) ] && kill -0 `cat $(PID_FILE)` 2>/dev/null; then \
 		echo "✓ SenseVoice API is running (PID: `cat $(PID_FILE)`)"; \
 		echo "  Port: $(PORT)"; \
@@ -96,9 +108,16 @@ status:
 		echo "  Latest log: `ls -t $(LOG_DIR)/sensevoice_api_*.log 2>/dev/null | head -1`"; \
 		echo "  API URL: http://localhost:$(PORT)"; \
 	else \
-		echo "✗ SenseVoice API is not running"; \
 		if [ -f $(PID_FILE) ]; then \
 			rm -f $(PID_FILE); \
+		fi; \
+		PIDS=`ps aux | grep "$(API_FILE)" | grep -v grep | awk '{print $$2}'`; \
+		if [ -n "$$PIDS" ]; then \
+			echo "⚠ SenseVoice API is running but PID file is missing/invalid"; \
+			echo "  Found processes: $$PIDS"; \
+			echo "  Use 'make stop' to stop all processes"; \
+		else \
+			echo "✗ SenseVoice API is not running"; \
 		fi \
 	fi
 
@@ -130,6 +149,7 @@ webui-start:
 
 # Stop the running WebUI
 webui-stop:
+	@# First try to stop by PID file
 	@if [ -f $(WEBUI_PID_FILE) ]; then \
 		if kill -0 `cat $(WEBUI_PID_FILE)` 2>/dev/null; then \
 			echo "Stopping SenseVoice WebUI (PID: `cat $(WEBUI_PID_FILE)`)..."; \
@@ -137,23 +157,41 @@ webui-stop:
 			rm -f $(WEBUI_PID_FILE); \
 			echo "✓ SenseVoice WebUI stopped"; \
 		else \
-			echo "Process not found. Cleaning up PID file..."; \
+			echo "Process in PID file not found. Cleaning up PID file..."; \
 			rm -f $(WEBUI_PID_FILE); \
 		fi \
-	else \
+	fi
+	@# Also try to find and stop by process name
+	@PIDS=`ps aux | grep "$(WEBUI_FILE)" | grep -v grep | awk '{print $$2}'`; \
+	if [ -n "$$PIDS" ]; then \
+		echo "Found running SenseVoice WebUI processes: $$PIDS"; \
+		for pid in $$PIDS; do \
+			echo "Stopping process $$pid..."; \
+			kill $$pid 2>/dev/null || true; \
+		done; \
+		echo "✓ All SenseVoice WebUI processes stopped"; \
+	elif [ ! -f $(WEBUI_PID_FILE) ]; then \
 		echo "SenseVoice WebUI is not running"; \
 	fi
 
 # Check WebUI status
 webui-status:
+	@# Check by PID file first
 	@if [ -f $(WEBUI_PID_FILE) ] && kill -0 `cat $(WEBUI_PID_FILE)` 2>/dev/null; then \
 		echo "✓ SenseVoice WebUI is running (PID: `cat $(WEBUI_PID_FILE)`)"; \
 		echo "  WebUI URL: http://localhost:$(WEBUI_PORT)"; \
 		echo "  Latest log: `ls -t $(LOG_DIR)/sensevoice_webui_*.log 2>/dev/null | head -1`"; \
 	else \
-		echo "✗ SenseVoice WebUI is not running"; \
 		if [ -f $(WEBUI_PID_FILE) ]; then \
 			rm -f $(WEBUI_PID_FILE); \
+		fi; \
+		PIDS=`ps aux | grep "$(WEBUI_FILE)" | grep -v grep | awk '{print $$2}'`; \
+		if [ -n "$$PIDS" ]; then \
+			echo "⚠ SenseVoice WebUI is running but PID file is missing/invalid"; \
+			echo "  Found processes: $$PIDS"; \
+			echo "  Use 'make webui-stop' to stop all processes"; \
+		else \
+			echo "✗ SenseVoice WebUI is not running"; \
 		fi \
 	fi
 
@@ -264,6 +302,39 @@ check-models:
 		ls -la models/; \
 	else \
 		echo "Models directory not found. Models will be downloaded on first run."; \
+	fi
+
+# Test process management (for debugging)
+test-process:
+	@echo "Starting test process in background..."
+	@nohup python3 test_process.py > test_process.log 2>&1 & echo $$! > .test_process.pid
+	@echo "Test process started (PID: `cat .test_process.pid`)"
+	@echo "Stop with: kill `cat .test_process.pid`"
+
+test-stop:
+	@STOPPED_BY_PID=0; \
+	if [ -f .test_process.pid ]; then \
+		if kill -0 `cat .test_process.pid` 2>/dev/null; then \
+			echo "Stopping test process (PID: `cat .test_process.pid`)..."; \
+			kill `cat .test_process.pid`; \
+			rm -f .test_process.pid; \
+			echo "✓ Test process stopped"; \
+			STOPPED_BY_PID=1; \
+		else \
+			echo "Process not found. Cleaning up PID file..."; \
+			rm -f .test_process.pid; \
+		fi \
+	fi; \
+	PIDS=`ps aux | grep "test_process.py" | grep -v grep | awk '{print $$2}'`; \
+	if [ -n "$$PIDS" ]; then \
+		echo "Found running test processes: $$PIDS"; \
+		for pid in $$PIDS; do \
+			echo "Stopping process $$pid..."; \
+			kill $$pid 2>/dev/null || true; \
+		done; \
+		echo "✓ All test processes stopped"; \
+	elif [ $$STOPPED_BY_PID -eq 0 ] && [ ! -f .test_process.pid ]; then \
+		echo "Test process is not running"; \
 	fi
 
 # Display help
