@@ -36,3 +36,6 @@ logs/
 *.pid
 Makefile
 cc_launcher.sh
+
+# Auth configuration
+auth_config.yaml
