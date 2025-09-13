@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Claude Code Launcher Script
-# Version: 2.2.19
+# Version: 2.2.25
 
 # 版本信息
-VERSION="2.2.19"
+VERSION="2.2.25"
 REMOTE_SCRIPT_URL="http://tfs.sthnext.com/cc/cc_launcher.sh"
 
 # 版本管理函数
@@ -138,6 +138,108 @@ update_version_in_script() {
     echo "✅ 已更新脚本版本号为: $new_version"
 }
 
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# 打印带颜色的消息
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_debug() {
+    if [[ "$DEBUG_MODE" == "true" ]]; then
+        echo -e "${CYAN}[DEBUG]${NC} $1"
+    fi
+}
+
+# 全局 DEBUG 变量
+DEBUG_MODE=false
+
+# 检查是否需要显示帮助信息
+if [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+    echo ""
+    echo "Claude Code Launcher v$VERSION"
+    echo ""
+    echo "用法："
+    echo "  $0              启动 Claude Code（交互式选择模式）"
+    echo "  $0 -u           更新 Claude Code 和 statusline 插件"
+    echo "  $0 --upload     上传脚本到 FTP 服务器"
+    echo "  $0 --debug      启用调试模式，显示详细信息"
+    echo "  $0 --help       显示此帮助信息"
+    echo ""
+    echo "参数说明："
+    echo "  -u              执行 Claude Code 和 statusline 插件的更新安装"
+    echo "  --upload        上传当前脚本文件到配置的 FTP 服务器"
+    echo "  --debug         启用调试模式，显示详细的请求和响应信息"
+    echo "  -h, --help      显示使用帮助"
+    echo ""
+    exit 0
+fi
+
+# 检查是否启用调试模式
+if [[ "$1" == "--debug" ]]; then
+    DEBUG_MODE=true
+    shift  # 移除 --debug 参数，继续处理后续参数
+    print_info "🔍 调试模式已启用"
+fi
+
+# 检查是否有 -u 参数（更新 Claude Code）
+if [[ "$1" == "-u" ]]; then
+    echo "🔄 准备更新 Claude Code..."
+    echo ""
+    
+    # 设置npm为非交互模式
+    export npm_config_yes=true
+    export npm_config_force=true
+    
+    print_info "正在更新 Claude Code CLI..."
+    echo "执行命令：npm install -g https://gaccode.com/claudecode/install --registry=https://registry.npmmirror.com"
+    
+    if npm install -g https://gaccode.com/claudecode/install --registry=https://registry.npmmirror.com --no-interactive; then
+        print_success "Claude Code CLI 更新完成"
+    else
+        print_error "Claude Code CLI 更新失败"
+        exit 1
+    fi
+    
+    echo ""
+    print_info "正在安装 statusline 插件..."
+    echo "执行命令：npm i -g https://gaccode.com/claudecode/install/statusline-plugin --registry=https://registry.npmmirror.com"
+    
+    if npm i -g https://gaccode.com/claudecode/install/statusline-plugin --registry=https://registry.npmmirror.com --no-interactive; then
+        print_success "statusline 插件安装完成"
+    else
+        print_error "statusline 插件安装失败"
+        exit 1
+    fi
+    
+    echo ""
+    print_success "✅ Claude Code 和 statusline 插件更新完成！"
+    echo ""
+    echo "现在可以运行以下命令启动 Claude Code："
+    echo "  ./cc_launcher.sh"
+    echo ""
+    
+    exit 0
+fi
+
 # 检查是否有 --upload 参数
 if [[ "$1" == "--upload" ]]; then
     # 执行上传功能
@@ -170,31 +272,63 @@ if [[ "$1" == "--upload" ]]; then
         echo "✅ 检测到完整的 FTP URL 配置"
         
         # 解析 FTP URL: ftp://user:pass@host:port/path
-        if [[ "$CC_LAUNCHER_FTP_URL" =~ ^ftp://([^:]+):([^@]+)@([^:/]+):?([0-9]*)(/.*)? ]]; then
-            CC_LAUNCHER_FTP_USER="${BASH_REMATCH[1]}"
-            CC_LAUNCHER_FTP_PASS="${BASH_REMATCH[2]}"
-            CC_LAUNCHER_FTP_HOST="${BASH_REMATCH[3]}"
-            FTP_PORT="${BASH_REMATCH[4]}"
-            CC_LAUNCHER_FTP_PATH="${BASH_REMATCH[5]}"
-            
-            # 如果有端口号，添加到主机地址
-            if [ -n "$FTP_PORT" ]; then
-                CC_LAUNCHER_FTP_HOST="$CC_LAUNCHER_FTP_HOST:$FTP_PORT"
-            fi
-            
-            # 如果没有路径，使用默认路径
-            if [ -z "$CC_LAUNCHER_FTP_PATH" ]; then
-                CC_LAUNCHER_FTP_PATH="/cc_launcher.sh"
-            fi
-            
-            echo "   用户: $CC_LAUNCHER_FTP_USER"
-            echo "   主机: $CC_LAUNCHER_FTP_HOST"
-            echo "   路径: $CC_LAUNCHER_FTP_PATH"
-        else
-            echo "❌ FTP URL 格式错误，应为: ftp://user:pass@host:port/path"
-            echo "   示例: ftp://tmp_file_service:NJeQBs92bkda@110.40.77.94:21/cc_launcher.sh"
-            exit 1
-        fi
+        case "$CC_LAUNCHER_FTP_URL" in
+            ftp://*)
+                # 移除 ftp:// 前缀
+                temp_url="${CC_LAUNCHER_FTP_URL#ftp://}"
+                
+                # 检查是否包含认证信息
+                case "$temp_url" in
+                    *@*)
+                        # 提取认证信息 (user:pass)
+                        auth_part="${temp_url%%@*}"
+                        remaining="${temp_url#*@}"
+                        
+                        # 分离用户名和密码
+                        CC_LAUNCHER_FTP_USER="${auth_part%%:*}"
+                        CC_LAUNCHER_FTP_PASS="${auth_part#*:}"
+                        
+                        # 处理主机和路径
+                        case "$remaining" in
+                            */*)
+                                # 包含路径
+                                host_port="${remaining%%/*}"
+                                CC_LAUNCHER_FTP_PATH="/${remaining#*/}"
+                                ;;
+                            *)
+                                # 不包含路径
+                                host_port="$remaining"
+                                CC_LAUNCHER_FTP_PATH="/cc_launcher.sh"
+                                ;;
+                        esac
+                        
+                        # 处理端口号
+                        case "$host_port" in
+                            *:*)
+                                CC_LAUNCHER_FTP_HOST="$host_port"
+                                ;;
+                            *)
+                                CC_LAUNCHER_FTP_HOST="$host_port"
+                                ;;
+                        esac
+                        
+                        echo "   用户: $CC_LAUNCHER_FTP_USER"
+                        echo "   主机: $CC_LAUNCHER_FTP_HOST"
+                        echo "   路径: $CC_LAUNCHER_FTP_PATH"
+                        ;;
+                    *)
+                        echo "❌ FTP URL 格式错误，缺少认证信息"
+                        echo "   应为: ftp://user:pass@host:port/path"
+                        exit 1
+                        ;;
+                esac
+                ;;
+            *)
+                echo "❌ FTP URL 格式错误，应为: ftp://user:pass@host:port/path"
+                echo "   示例: ftp://tmp_file_service:NJeQBs92bkda@110.40.77.94:21/cc_launcher.sh"
+                exit 1
+                ;;
+        esac
     fi
     
     # 检查 FTP 配置，如果没有则提示用户输入
@@ -353,13 +487,16 @@ if [[ "$1" == "--upload" ]]; then
     
     # 构建 FTP URL
     # 检查 CC_LAUNCHER_FTP_HOST 是否已经包含协议
-    if [[ "$CC_LAUNCHER_FTP_HOST" =~ ^ftp:// ]]; then
-        # 已经包含协议，直接使用
-        FTP_URL="${CC_LAUNCHER_FTP_HOST%/}${CC_LAUNCHER_FTP_PATH}"
-    else
-        # 不包含协议，添加 ftp://
-        FTP_URL="ftp://$CC_LAUNCHER_FTP_HOST$CC_LAUNCHER_FTP_PATH"
-    fi
+    case "$CC_LAUNCHER_FTP_HOST" in
+        ftp://*)
+            # 已经包含协议，直接使用
+            FTP_URL="${CC_LAUNCHER_FTP_HOST%/}${CC_LAUNCHER_FTP_PATH}"
+            ;;
+        *)
+            # 不包含协议，添加 ftp://
+            FTP_URL="ftp://$CC_LAUNCHER_FTP_HOST$CC_LAUNCHER_FTP_PATH"
+            ;;
+    esac
     
     # 执行上传
     curl -T "$SCRIPT_FILE" \
@@ -465,8 +602,8 @@ declare -a CLAUDE_CODE_MODELS=(
 )
 
 # 设置默认的 ANTHROPIC_BASE_URL（仅在需要时设置）
-ANTHROPIC_BASE_URL_DEFAULT="https://aihubmax.com"
-# ANTHROPIC_BASE_URL_DEFAULT="https://comfyrouter.com"
+# ANTHROPIC_BASE_URL_DEFAULT="https://aihubmax.com"
+ANTHROPIC_BASE_URL_DEFAULT="https://comfyrouter.com"
 # ANTHROPIC_BASE_URL_DEFAULT="http://127.0.0.1:3456"
 # 注意：ANTHROPIC_BASE_URL 将在选择接入方式后设置
 
@@ -475,6 +612,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # 打印带颜色的消息
@@ -519,7 +657,7 @@ add_to_config_files() {
             sed -i.bak "/export $var_name=/d" "$file" 2>/dev/null || sed -i '' "/export $var_name=/d" "$file"
             # 添加新的
             echo "export $var_name=\"$var_value\"" >> "$file"
-            print_info "已添加 $var_name 到 $file"
+            print_debug "已添加 $var_name 到 $file"
         fi
     done
 }
@@ -537,40 +675,108 @@ source_config_files() {
     fi
 }
 
+# 清理 API 密钥输入
+clean_api_key() {
+    local api_key="$1"
+    
+    # 特殊处理：如果API密钥包含提示文本，提取实际的密钥部分
+    if [[ "$api_key" == *":"* ]]; then
+        # 如果包含冒号，提取冒号后面的部分作为实际的API密钥
+        api_key="${api_key##*:}"
+    fi
+    
+    # 清理API密钥：去除首尾空格、换行符、制表符等不可见字符
+    api_key=$(echo "$api_key" | tr -d ' \t\n\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    
+    echo "$api_key"
+}
+
 # 测试 API 密钥
 test_api_key() {
     local api_key=$1
+    
+    # 使用统一的清理函数
+    api_key=$(clean_api_key "$api_key")
+    
     print_info "正在验证 API 密钥..."
     
-    local start_time=$(date +%s.%N)
-    local response=$(curl -s -w "\n%{http_code}" --location --request POST "$ANTHROPIC_BASE_URL/v1/messages" \
-        --header "x-api-key: $api_key" \
-        --header "anthropic-version: 2023-06-01" \
-        --header "content-type: application/json" \
-        --data-raw '{
+    # 验证API密钥格式（通常以sk-开头）
+    if [[ ! "$api_key" =~ ^sk- ]]; then
+        print_error "API密钥格式不正确！密钥应该以 'sk-' 开头"
+        return 1
+    fi
+    
+    # 构建请求头
+    local header1="x-api-key: $api_key"
+    local header2="anthropic-version: 2023-06-01"
+    local header3="content-type: application/json"
+    local url="$ANTHROPIC_BASE_URL/v1/messages"
+    
+    # Debug 信息
+    print_debug "API Key 验证参数:"
+    print_debug "  上游地址: $url"
+    print_debug "  请求方法: POST"
+    print_debug "  请求头:"
+    print_debug "    ${header1/:*/: ${api_key:0:10}...${api_key: -4}}"
+    print_debug "    $header2"
+    print_debug "    $header3"
+    
+    local request_body='{
             "model": "claude-sonnet-4-20250514",
-            "max_tokens": 1024,
+            "max_tokens": 10,
             "messages": [
-                {"role": "user", "content": "Hello, world"}
+                {"role": "user", "content": "Hi"}
             ]
-        }' 2>/dev/null)
+        }'
+    
+    print_debug "请求体:"
+    if [[ "$DEBUG_MODE" == "true" ]]; then
+        echo "$request_body" | sed 's/^/    /'
+    fi
+    
+    local start_time=$(date +%s.%N)
+    local response=$(curl -s -w "\n%{http_code}" --location --request POST "$url" \
+        --header "$header1" \
+        --header "$header2" \
+        --header "$header3" \
+        --data-raw "$request_body" 2>/dev/null)
     
     local end_time=$(date +%s.%N)
-    local elapsed=$(echo "$end_time - $start_time" | bc)
+    local elapsed=$(echo "$end_time - $start_time" | bc 2>/dev/null || echo "N/A")
     
     # 分离响应体和 HTTP 状态码
     local http_code=$(echo "$response" | tail -n1)
     local body=$(echo "$response" | sed '$d')
     
+    # Debug 响应信息
+    print_debug "响应信息:"
+    print_debug "  HTTP 状态码: $http_code"
+    print_debug "  请求耗时: ${elapsed}s"
+    if [[ "$DEBUG_MODE" == "true" && -n "$body" ]]; then
+        print_debug "  响应体:"
+        echo "$body" | sed 's/^/    /'
+    fi
+    
     if [[ "$http_code" == "200" ]] && echo "$body" | grep -q '"type":"message"'; then
         print_success "API 密钥验证成功！"
-        printf "${GREEN}请求耗时: %.2f 秒${NC}\n" "$elapsed"
+        if [[ "$elapsed" != "N/A" ]]; then
+            printf "${GREEN}请求耗时: %.2f 秒${NC}\n" "$elapsed"
+        fi
         return 0
     else
         print_error "API 密钥验证失败！"
         if [[ -n "$body" ]]; then
             print_error "错误信息: $body"
         fi
+        
+        # 尝试常见的修复建议
+        echo ""
+        print_info "可能的解决方案："
+        echo "1. 检查API密钥是否正确（从 https://comfyrouter.com/console/token 获取）"
+        echo "2. 确认API密钥是否已激活"
+        echo "3. 检查账户余额是否充足"
+        echo "4. 如果问题持续，请联系服务商确认API端点配置"
+        
         return 1
     fi
 }
@@ -581,18 +787,41 @@ test_custom_model() {
     local api_key=$2
     print_info "正在验证模型ID: $model_id..."
     
-    local start_time=$(date +%s.%N)
-    local response=$(curl -s -w "\n%{http_code}" --location --request POST "$ANTHROPIC_BASE_URL/v1/messages" \
-        --header "x-api-key: $api_key" \
-        --header "anthropic-version: 2023-06-01" \
-        --header "content-type: application/json" \
-        --data-raw '{
+    # 构建请求头
+    local header1="x-api-key: $api_key"
+    local header2="anthropic-version: 2023-06-01"
+    local header3="content-type: application/json"
+    local url="$ANTHROPIC_BASE_URL/v1/messages"
+    
+    # Debug 信息
+    print_debug "模型验证参数:"
+    print_debug "  上游地址: $url"
+    print_debug "  请求方法: POST"
+    print_debug "  模型ID: $model_id"
+    print_debug "  请求头:"
+    print_debug "    ${header1/:*/: ${api_key:0:10}...${api_key: -4}}"
+    print_debug "    $header2"
+    print_debug "    $header3"
+    
+    local request_body='{
             "model": "'"$model_id"'",
             "max_tokens": 1024,
             "messages": [
                 {"role": "user", "content": "Hello"}
             ]
-        }' 2>/dev/null)
+        }'
+    
+    print_debug "请求体:"
+    if [[ "$DEBUG_MODE" == "true" ]]; then
+        echo "$request_body" | sed 's/^/    /'
+    fi
+    
+    local start_time=$(date +%s.%N)
+    local response=$(curl -s -w "\n%{http_code}" --location --request POST "$url" \
+        --header "$header1" \
+        --header "$header2" \
+        --header "$header3" \
+        --data-raw "$request_body" 2>/dev/null)
     
     local end_time=$(date +%s.%N)
     local elapsed=$(echo "$end_time - $start_time" | bc)
@@ -600,6 +829,15 @@ test_custom_model() {
     # 分离响应体和 HTTP 状态码
     local http_code=$(echo "$response" | tail -n1)
     local body=$(echo "$response" | sed '$d')
+    
+    # Debug 响应信息
+    print_debug "响应信息:"
+    print_debug "  HTTP 状态码: $http_code"
+    print_debug "  请求耗时: ${elapsed}s"
+    if [[ "$DEBUG_MODE" == "true" && -n "$body" ]]; then
+        print_debug "  响应体:"
+        echo "$body" | sed 's/^/    /'
+    fi
     
     if [[ "$http_code" == "200" ]] && echo "$body" | grep -q '"type":"message"'; then
         print_success "模型ID验证成功！"
@@ -682,11 +920,14 @@ read_single_char() {
     fi
     
     # 显示用户输入的字符（除非是特殊字符）
-    if [[ "$char" =~ [[:print:]] ]]; then
-        echo "$char" >&2
-    else
-        echo "" >&2
-    fi
+    case "$char" in
+        [[:print:]])
+            echo "$char" >&2
+            ;;
+        *)
+            echo "" >&2
+            ;;
+    esac
     
     # 返回字符
     echo "$char"
@@ -984,37 +1225,78 @@ compare_versions() {
     fi
     
     # 检查是否包含非版本号内容（如果包含空格或其他字符，可能是错误信息）
-    if [[ "$version1" =~ [[:space:]] || "$version2" =~ [[:space:]] ]]; then
-        return 0  # 如果包含空格，可能是错误信息，认为相等
-    fi
+    case "$version1" in
+        *[[:space:]]*)
+            return 0  # 如果包含空格，可能是错误信息，认为相等
+            ;;
+    esac
+    case "$version2" in
+        *[[:space:]]*)
+            return 0  # 如果包含空格，可能是错误信息，认为相等
+            ;;
+    esac
     
     # 移除可能的前缀字符（如 v）
     version1=$(echo "$version1" | sed 's/^[vV]//')
     version2=$(echo "$version2" | sed 's/^[vV]//')
     
-    # 分割版本号
-    IFS='.' read -ra VER1 <<< "$version1"
-    IFS='.' read -ra VER2 <<< "$version2"
+    # 分割版本号并处理
+    v1_major=$(echo "$version1" | cut -d. -f1)
+    v1_minor=$(echo "$version1" | cut -d. -f2)
+    v1_patch=$(echo "$version1" | cut -d. -f3)
     
-    # 确保版本号数组长度一致，不足的补0
-    while [ ${#VER1[@]} -lt 3 ]; do VER1+=(0); done
-    while [ ${#VER2[@]} -lt 3 ]; do VER2+=(0); done
+    v2_major=$(echo "$version2" | cut -d. -f1)
+    v2_minor=$(echo "$version2" | cut -d. -f2)
+    v2_patch=$(echo "$version2" | cut -d. -f3)
     
-    # 逐位比较
-    for i in {0..2}; do
-        local v1=${VER1[i]:-0}
-        local v2=${VER2[i]:-0}
-        
-        # 确保是数字
-        if ! [[ "$v1" =~ ^[0-9]+$ ]]; then v1=0; fi
-        if ! [[ "$v2" =~ ^[0-9]+$ ]]; then v2=0; fi
-        
-        if [ "$v1" -gt "$v2" ]; then
-            return 1  # version1 > version2
-        elif [ "$v1" -lt "$v2" ]; then
-            return 2  # version1 < version2
-        fi
-    done
+    # 设置默认值为0
+    v1_major=${v1_major:-0}
+    v1_minor=${v1_minor:-0}
+    v1_patch=${v1_patch:-0}
+    v2_major=${v2_major:-0}
+    v2_minor=${v2_minor:-0}
+    v2_patch=${v2_patch:-0}
+    
+    # 确保是数字
+    case "$v1_major" in
+        ''|*[!0-9]*) v1_major=0 ;;
+    esac
+    case "$v1_minor" in
+        ''|*[!0-9]*) v1_minor=0 ;;
+    esac
+    case "$v1_patch" in
+        ''|*[!0-9]*) v1_patch=0 ;;
+    esac
+    case "$v2_major" in
+        ''|*[!0-9]*) v2_major=0 ;;
+    esac
+    case "$v2_minor" in
+        ''|*[!0-9]*) v2_minor=0 ;;
+    esac
+    case "$v2_patch" in
+        ''|*[!0-9]*) v2_patch=0 ;;
+    esac
+    
+    # 比较主版本号
+    if [ "$v1_major" -gt "$v2_major" ]; then
+        return 1  # version1 > version2
+    elif [ "$v1_major" -lt "$v2_major" ]; then
+        return 2  # version1 < version2
+    fi
+    
+    # 比较次版本号
+    if [ "$v1_minor" -gt "$v2_minor" ]; then
+        return 1  # version1 > version2
+    elif [ "$v1_minor" -lt "$v2_minor" ]; then
+        return 2  # version1 < version2
+    fi
+    
+    # 比较补丁版本号
+    if [ "$v1_patch" -gt "$v2_patch" ]; then
+        return 1  # version1 > version2
+    elif [ "$v1_patch" -lt "$v2_patch" ]; then
+        return 2  # version1 < version2
+    fi
     
     return 0  # version1 == version2
 }
@@ -1374,6 +1656,341 @@ delete_claude_account() {
             return 0
         fi
     done
+}
+
+# 保存GAC_API_KEY到配置文件
+save_gac_api_key_to_config() {
+    local gac_api_key=$1
+    
+    if [[ -z "$gac_api_key" ]]; then
+        print_error "GAC_API_KEY不能为空"
+        return 1
+    fi
+    
+    # 使用现有的add_to_config_files函数保存到配置文件
+    add_to_config_files "GAC_API_KEY" "$gac_api_key"
+    
+    # 激活配置文件
+    source_config_files
+    
+    print_info "GAC_API_KEY 已保存到以下配置文件："
+    local files=("$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zshrc")
+    for file in "${files[@]}"; do
+        if [[ -f "$file" ]]; then
+            print_info "  - $file"
+        fi
+    done
+}
+
+# 校验镜像站是否可用
+validate_mirror_site() {
+    print_info "正在校验镜像站是否可用..."
+    echo ""
+    
+    # 检查 GAC_API_KEY 环境变量
+    local gac_api_key="${GAC_API_KEY:-}"
+    
+    # 清理 GAC_API_KEY：去掉可能的前缀 "GAC_API_KEY: "
+    if [[ "$gac_api_key" == GAC_API_KEY:* ]]; then
+        gac_api_key="${gac_api_key#GAC_API_KEY: }"
+        print_debug "检测到 GAC_API_KEY 包含前缀，已清理"
+    fi
+    
+    # Debug: 输出原始的 GAC_API_KEY 值
+    print_debug "原始 GAC_API_KEY 值:"
+    print_debug "  长度: ${#gac_api_key}"
+    print_debug "  前10个字符: '${gac_api_key:0:10}'"
+    print_debug "  后4个字符: '${gac_api_key: -4}'"
+    print_debug "  完整值: '$gac_api_key'"
+    
+    if [[ -z "$gac_api_key" ]]; then
+        print_warning "未检测到 GAC_API_KEY 环境变量"
+        echo ""
+        echo "请选择："
+        echo "1. 创建 API 密钥用于校验服务可用性"
+        echo "2. 跳过校验，直接进入下一步"
+        echo ""
+        
+        local validation_choice=$(read_valid_option "请选择" "2" "12")
+        check_user_cancel "$validation_choice"
+        
+        if [[ "$validation_choice" == "2" ]]; then
+            print_info "跳过镜像站校验"
+            return 0
+        else
+            echo ""
+            print_info "请输入您的 GAC API 密钥："
+            local input_gac_key
+            input_gac_key=$(safe_read_input "GAC_API_KEY" "")
+            
+            if [[ -z "$input_gac_key" ]]; then
+                print_warning "未输入 API 密钥，跳过校验"
+                return 0
+            fi
+            
+            echo ""
+            echo "请选择 GAC_API_KEY 保存方式："
+            echo "1. 仅本次会话有效（临时）"
+            echo "2. 永久保存到配置文件"
+            echo ""
+            
+            local save_choice=$(read_valid_option "请选择保存方式" "2" "12")
+            check_user_cancel "$save_choice"
+            
+            if [[ "$save_choice" == "1" ]]; then
+                # 临时设置
+                export GAC_API_KEY="$input_gac_key"
+                gac_api_key="$input_gac_key"
+                print_success "已设置 GAC_API_KEY 环境变量（仅本次会话有效）"
+            else
+                # 永久保存到配置文件
+                save_gac_api_key_to_config "$input_gac_key"
+                export GAC_API_KEY="$input_gac_key"
+                gac_api_key="$input_gac_key"
+                print_success "已永久保存 GAC_API_KEY 到配置文件"
+            fi
+        fi
+    fi
+    
+    print_info "找到 GAC_API_KEY，开始校验镜像站..."
+    echo "按 ESC 键可取消校验"
+    echo ""
+    
+    # 发送校验请求
+    local response
+    local http_code
+    local temp_response_file=$(mktemp)
+    local temp_error_file=$(mktemp)
+    
+    # 设置ESC键监听（后台进程，重定向所有输出）
+    local validation_cancelled=false
+    (
+        while true; do
+            read -rsn1 key 2>/dev/null
+            if [[ $key == $'\e' ]]; then
+                echo "validation_cancelled" > "$temp_response_file"
+                kill -USR1 $$ 2>/dev/null
+                break
+            fi
+        done
+    ) >/dev/null 2>&1 &
+    local escape_pid=$!
+    
+    # 捕获USR1信号
+    trap 'validation_cancelled=true' USR1
+    
+    print_info "正在发送校验请求..."
+    
+    # 构建请求头和URL
+    local header1="x-api-key: $gac_api_key"
+    local header2="anthropic-version: 2023-06-01"
+    local header3="content-type: application/json"
+    local url="https://gaccode.com/claudecode/v1/messages"
+    local max_time=10
+    
+    # Debug 信息
+    print_debug "镜像站校验参数:"
+    print_debug "  上游地址: $url"
+    print_debug "  请求方法: POST"
+    print_debug "  超时时间: ${max_time}秒"
+    print_debug "  请求头:"
+    print_debug "    x-api-key: ${gac_api_key:0:10}...${gac_api_key: -4}"
+    print_debug "    $header2"
+    print_debug "    $header3"
+    
+    local request_body='{
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "user", "content": "time"}
+            ]
+        }'
+    
+    print_debug "请求体:"
+    if [[ "$DEBUG_MODE" == "true" ]]; then
+        echo "$request_body" | sed 's/^/    /'
+    fi
+    
+    # 记录请求开始时间
+    local start_time=$(date +%s.%N)
+    
+    # 发送curl请求
+    http_code=$(curl -s -w "%{http_code}" \
+        --max-time "$max_time" \
+        --location \
+        --request POST "$url" \
+        --header "$header1" \
+        --header "$header2" \
+        --header "$header3" \
+        --data-raw "$request_body" \
+        -o "$temp_response_file" \
+        2>"$temp_error_file")
+    
+    # 记录请求结束时间
+    local end_time=$(date +%s.%N)
+    local elapsed=$(echo "$end_time - $start_time" | bc 2>/dev/null || echo "N/A")
+    
+    # 清理ESC键监听进程（重定向所有输出避免污染debug日志）
+    {
+        kill $escape_pid 2>/dev/null
+        wait $escape_pid 2>/dev/null
+    } >/dev/null 2>&1
+    trap - USR1
+    
+    # 检查是否被取消
+    if [[ "$validation_cancelled" == "true" ]] || [[ -f "$temp_response_file" && "$(cat "$temp_response_file")" == "validation_cancelled" ]]; then
+        print_info "校验已取消"
+        rm -f "$temp_response_file" "$temp_error_file"
+        return 0
+    fi
+    
+    echo ""
+    print_info "校验完成"
+    echo ""
+    
+    # Debug 响应信息
+    print_debug "镜像站校验响应信息:"
+    print_debug "  HTTP 状态码: $http_code"
+    print_debug "  请求耗时: ${elapsed}s"
+    if [[ "$DEBUG_MODE" == "true" && -f "$temp_error_file" && -s "$temp_error_file" ]]; then
+        print_debug "  错误信息:"
+        cat "$temp_error_file" 2>/dev/null | sed 's/^/    /'
+    fi
+    if [[ "$DEBUG_MODE" == "true" && -f "$temp_response_file" && -s "$temp_response_file" ]]; then
+        print_debug "  响应体:"
+        cat "$temp_response_file" 2>/dev/null | sed 's/^/    /'
+    fi
+    
+    # 显示HTTP状态码并处理异常情况
+    local mirror_site_available=false
+    if [[ -n "$http_code" ]]; then
+        if [[ "$http_code" == "200" ]]; then
+            print_success "HTTP状态码: $http_code - 镜像站服务可用"
+            if [[ "$elapsed" != "N/A" ]]; then
+                printf "${GREEN}请求耗时: %.2f 秒${NC}\n" "$elapsed"
+            fi
+            mirror_site_available=true
+        elif [[ "$http_code" == "400" ]]; then
+            # HTTP 400 状态码：检查响应体是否包含 request_id
+            if [[ -f "$temp_response_file" && -s "$temp_response_file" ]] && grep -q "request_id" "$temp_response_file"; then
+                # 提取 request_id
+                local request_id=$(grep -o '"request_id":"[^"]*"' "$temp_response_file" | cut -d'"' -f4)
+                print_success "GAC镜像站服务正常(\"request_id\":\"$request_id\"),响应耗时 ${elapsed}秒"
+                
+                # 详细信息只在debug模式下显示
+                print_debug "HTTP状态码: $http_code - 镜像站服务可用（请求格式错误但服务正常）"
+                if [[ "$elapsed" != "N/A" ]] && [[ "$DEBUG_MODE" == "true" ]]; then
+                    print_debug "请求耗时: ${elapsed} 秒"
+                fi
+                mirror_site_available=true
+            else
+                print_error "HTTP状态码: $http_code - 镜像站服务异常（请求错误且无有效响应）"
+            fi
+        elif [[ "$http_code" == "500" ]]; then
+            print_error "HTTP状态码: $http_code - 镜像站服务不可用（服务器内部错误）"
+        else
+            print_warning "HTTP状态码: $http_code - 镜像站状态未知"
+        fi
+    else
+        print_error "请求失败，无法获取HTTP状态码"
+    fi
+    
+    echo ""
+    
+    # 原始响应信息只在debug模式下显示
+    if [[ "$DEBUG_MODE" == "true" ]]; then
+        print_info "=== 原始响应信息 ==="
+        
+        # 显示响应内容
+        if [[ -f "$temp_response_file" && -s "$temp_response_file" ]]; then
+            echo "响应内容:"
+            cat "$temp_response_file"
+            echo ""
+        fi
+        
+        # 显示错误信息
+        if [[ -f "$temp_error_file" && -s "$temp_error_file" ]]; then
+            echo "错误信息:"
+            cat "$temp_error_file"
+            echo ""
+        fi
+        
+        print_info "========================"
+        echo ""
+    fi
+    
+    # 清理临时文件
+    rm -f "$temp_response_file" "$temp_error_file"
+    
+    # 如果镜像站服务异常，询问用户是否切换到API模式
+    if [[ "$mirror_site_available" == "false" ]]; then
+        echo ""
+        print_warning "镜像站服务异常，请选择后续操作："
+        echo "1. 继续使用镜像站（可能无法正常使用）"
+        echo "2. 切换到 API 接入模式"
+        echo "3. 更新 GAC_API_KEY 并重新校验"
+        echo ""
+        
+        local fallback_choice=$(read_valid_option "请选择" "2" "123")
+        check_user_cancel "$fallback_choice"
+        
+        if [[ "$fallback_choice" == "2" ]]; then
+            print_info "用户选择切换到 API 接入模式"
+            # 设置全局变量，用于后续流程判断
+            SWITCH_TO_API_MODE="true"
+            return 1  # 返回错误码，表示需要切换到API模式
+        elif [[ "$fallback_choice" == "3" ]]; then
+            # 更新 GAC_API_KEY
+            print_info "更新 GAC_API_KEY"
+            echo ""
+            print_info "请输入新的 GAC API 密钥："
+            local new_gac_key
+            new_gac_key=$(safe_read_input "GAC_API_KEY" "")
+            
+            if [[ -z "$new_gac_key" ]]; then
+                print_warning "未输入新的 API 密钥，继续使用原密钥"
+            else
+                # 清理新输入的密钥（去掉可能的前缀）
+                if [[ "$new_gac_key" == GAC_API_KEY:* ]]; then
+                    new_gac_key="${new_gac_key#GAC_API_KEY: }"
+                fi
+                
+                echo ""
+                echo "请选择 GAC_API_KEY 保存方式："
+                echo "1. 仅本次会话有效（临时）"
+                echo "2. 永久保存到配置文件"
+                echo ""
+                
+                local save_choice=$(read_valid_option "请选择保存方式" "2" "12")
+                check_user_cancel "$save_choice"
+                
+                if [[ "$save_choice" == "1" ]]; then
+                    # 临时设置
+                    export GAC_API_KEY="$new_gac_key"
+                    gac_api_key="$new_gac_key"
+                    print_success "已更新 GAC_API_KEY 环境变量（仅本次会话有效）"
+                else
+                    # 永久保存到配置文件
+                    save_gac_api_key_to_config "$new_gac_key"
+                    export GAC_API_KEY="$new_gac_key"
+                    gac_api_key="$new_gac_key"
+                    print_success "已永久保存 GAC_API_KEY 到配置文件"
+                fi
+                
+                echo ""
+                print_info "重新校验镜像站..."
+                # 递归调用自身重新校验
+                validate_mirror_site
+                return $?
+            fi
+        else
+            print_info "用户选择继续使用镜像站"
+        fi
+    else
+        # 镜像站可用，提示用户按任意键继续
+        echo "按任意键继续..."
+        read -rsn1
+    fi
 }
 
 # 清除API环境变量
@@ -1789,20 +2406,20 @@ check_claude_code() {
 check_claude_code
 
 # 环境检测阶段
-print_info "进行环境检测..."
+print_debug "进行环境检测..."
 
 # 设置默认的 ANTHROPIC_BASE_URL
 export ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL_DEFAULT"
-print_info "设置 ANTHROPIC_BASE_URL: $ANTHROPIC_BASE_URL"
+print_debug "设置 ANTHROPIC_BASE_URL: $ANTHROPIC_BASE_URL"
 
 # 先加载配置文件以确保环境变量可用
 source_config_files
 
 # 检测当前环境中是否存在 ANTHROPIC_API_KEY
 if [[ -n "$ANTHROPIC_API_KEY" ]]; then
-    print_info "检测到环境变量中的 ANTHROPIC_API_KEY"
+    print_debug "检测到环境变量中的 ANTHROPIC_API_KEY"
 else
-    print_info "未检测到环境变量中的 ANTHROPIC_API_KEY"
+    print_debug "未检测到环境变量中的 ANTHROPIC_API_KEY"
 fi
 
 # Claude Code账户管理 - 检测配置文件
@@ -1857,8 +2474,27 @@ case "$choice" in
     "2"|2)
         # Claude Code账户登录
         ACCESS_MODE="account"
-        clear_api_env_vars
-        # 跳转到启动模式选择
+        
+        # 校验镜像站是否可用
+        if ! validate_mirror_site; then
+            # 镜像站异常且用户选择切换到API模式
+            if [[ "$SWITCH_TO_API_MODE" == "true" ]]; then
+                print_info "切换到 API 接入模式"
+                ACCESS_MODE="api"
+                # 重置切换标志
+                unset SWITCH_TO_API_MODE
+                # 跳转到API接入流程
+                choice="1"
+            else
+                # 用户选择继续使用镜像站
+                clear_api_env_vars
+                # 跳转到启动模式选择
+            fi
+        else
+            # 镜像站正常或用户跳过校验
+            clear_api_env_vars
+            # 跳转到启动模式选择
+        fi
         ;;
     "3"|3)
         # 添加新Claude Code账号
@@ -1882,8 +2518,8 @@ case "$choice" in
         ;;
 esac
 
-# API 接入流程（仅在选择 API 接入时执行）
-if [[ "$choice" == "1" ]]; then
+# API 接入流程（仅在选择 API 接入时执行，或从镜像站切换而来）
+if [[ "$choice" == "1" ]] || [[ "$ACCESS_MODE" == "api" && "$choice" == "2" ]]; then
     print_info "使用 API 接入模式"
     
     # 步骤 6.1：API密钥检查和配置方式选择
@@ -1936,7 +2572,7 @@ if [[ "$choice" == "1" ]]; then
             
             # 设置临时BASE_URL
             export ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL_DEFAULT"
-            print_info "设置 ANTHROPIC_BASE_URL: $ANTHROPIC_BASE_URL"
+            print_debug "设置 ANTHROPIC_BASE_URL: $ANTHROPIC_BASE_URL"
             
             # 获取API密钥
             api_key=""
@@ -1949,13 +2585,13 @@ if [[ "$choice" == "1" ]]; then
             # 如果没有API密钥，提示用户输入
             if [[ -z "$api_key" ]]; then
                 echo ""
-                echo "（打开 https://www.aihubmax.com/console/token 获取API令牌）"
+                echo "（打开 https://comfyrouter.com/console/token 获取API令牌）"
                 api_key=$(safe_read_input "请输入您的 API 令牌")
             fi
             
             # 验证API密钥
             if test_api_key "$api_key"; then
-                export ANTHROPIC_API_KEY="$api_key"
+                export ANTHROPIC_API_KEY="$(clean_api_key "$api_key")"
                 print_success "API 密钥验证成功！已设置临时环境变量"
             else
                 print_error "API 密钥验证失败，退出程序"
@@ -1968,7 +2604,7 @@ if [[ "$choice" == "1" ]]; then
             
             # 直接更新BASE_URL到所有配置文件
             add_to_config_files "ANTHROPIC_BASE_URL" "$ANTHROPIC_BASE_URL_DEFAULT"
-            print_info "设置 ANTHROPIC_BASE_URL: $ANTHROPIC_BASE_URL_DEFAULT"
+            print_debug "设置 ANTHROPIC_BASE_URL: $ANTHROPIC_BASE_URL_DEFAULT"
             source_config_files
             
             # 获取API密钥
@@ -1982,16 +2618,16 @@ if [[ "$choice" == "1" ]]; then
             # 如果没有API密钥，提示用户输入
             if [[ -z "$api_key" ]]; then
                 echo ""
-                echo "（打开 https://www.aihubmax.com/console/token 获取API令牌）"
+                echo "（打开 https://comfyrouter.com/console/token 获取API令牌）"
                 api_key=$(safe_read_input "请输入您的 API 令牌")
             fi
             
             # 验证API密钥
             if test_api_key "$api_key"; then
                 # 保存API密钥到配置文件
-                add_to_config_files "ANTHROPIC_API_KEY" "$api_key"
+                add_to_config_files "ANTHROPIC_API_KEY" "$(clean_api_key "$api_key")"
                 source_config_files
-                export ANTHROPIC_API_KEY="$api_key"
+                export ANTHROPIC_API_KEY="$(clean_api_key "$api_key")"
                 print_success "API 密钥验证成功！已保存到全局配置文件"
             else
                 print_error "API 密钥验证失败，退出程序"
@@ -2005,15 +2641,15 @@ if [[ "$choice" == "1" ]]; then
             # 显示脱敏的API令牌
             print_info "当前API令牌: ${env_api_key:0:10}...${env_api_key: -4}"
             echo ""
-            echo "（打开 https://www.aihubmax.com/console/token 获取API令牌）"
+            echo "（打开 https://comfyrouter.com/console/token 获取API令牌）"
             new_api_key=$(safe_read_input "请输入新的 API 令牌")
             
             # 验证新的API令牌
             if test_api_key "$new_api_key"; then
                 # 更新配置文件中的API令牌
-                add_to_config_files "ANTHROPIC_API_KEY" "$new_api_key"
+                add_to_config_files "ANTHROPIC_API_KEY" "$(clean_api_key "$new_api_key")"
                 source_config_files
-                export ANTHROPIC_API_KEY="$new_api_key"
+                export ANTHROPIC_API_KEY="$(clean_api_key "$new_api_key")"
                 print_success "新API令牌验证成功！已更新配置文件"
             else
                 print_error "新API令牌验证失败，退出程序"
@@ -2085,7 +2721,7 @@ case $mode in
                 elif [[ "$model_choice" -eq "$((${#API_RECOMMENDED_MODELS[@]}+1))" ]]; then
                     # 手动输入模型ID
                     echo ""
-                    print_info "请访问 http://xx.com/ccmodellist 查看支持的模型ID"
+                    print_info "请访问 https://s.sthnext.com/ggq0ib 查看支持的模型ID"
                     echo ""
                     custom_model_id=$(safe_read_input "请输入模型ID")
                     
@@ -2133,14 +2769,17 @@ case $mode in
             
             if [[ -n "$custom_command" ]]; then
                 # 检查命令中是否包含危险参数，如果包含则拒绝执行
-                if [[ "$custom_command" =~ --dangerously-skip-permissions ]]; then
-                    print_error "⚠️  错误：不能在 root 权限下使用 --dangerously-skip-permissions 参数"
-                    print_info "使用默认普通模式..."
-                    run_claude
-                else
-                    print_info "执行自定义命令: $custom_command"
-                    eval "$custom_command"
-                fi
+                case "$custom_command" in
+                    *--dangerously-skip-permissions*)
+                        print_error "⚠️  错误：不能在 root 权限下使用 --dangerously-skip-permissions 参数"
+                        print_info "使用默认普通模式..."
+                        run_claude
+                        ;;
+                    *)
+                        print_info "执行自定义命令: $custom_command"
+                        eval "$custom_command"
+                        ;;
+                esac
             else
                 print_error "命令不能为空，使用默认模式..."
                 run_claude

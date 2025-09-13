@@ -35,3 +35,4 @@ logs/
 # PID file
 *.pid
 Makefile
+cc_launcher.sh

@@ -26,9 +26,9 @@ services:
     
     # Volumes - uncomment if you want to mount models from host
     # This is useful if you want to avoid copying models into the image
-    # volumes:
-    #   - ./models:/app/models:ro
-    #   - ./data:/app/data:ro
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
     
     # Resource limits (optional)
     # deploy:
