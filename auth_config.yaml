@@ -1,0 +1,28 @@
+# Authentication configuration for SenseVoice API
+# Bearer Token 配置文件
+
+auth:
+  # 用户组和对应的 tokens
+  users:
+    # 管理员用户组
+    admin:
+      - "token_admin_12345678"
+      - "token_admin_87654321"
+    
+    # 普通用户组
+    zhaohan:
+      - "sk-GHm8oViPIGTrja3Jx4PcvnwOBPklFLpljFt8BrOuhoZlNNhJ"
+    julia:
+      - "sk-O7UkxiWJd4tFXVjrU6ztWSC18L6ymqIKrXnzVJuCPPwmiODX"
+    
+    # API 客户端组
+    api_client:
+      - "token_api_qrstuvwx"
+      - "token_api_yzabcdef"
+  
+  # 全局设置
+  settings:
+    # 是否启用认证（可以用于开发环境关闭认证）
+    enabled: true
+    # Token 前缀（Bearer）
+    token_prefix: "Bearer"

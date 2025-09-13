@@ -30,6 +30,15 @@ start:
 		echo "Use 'make stop' to stop it first"; \
 		exit 1; \
 	fi
+	@# Check if port is already in use and kill the process using it
+	@PORT_PID=`lsof -ti :$(PORT) 2>/dev/null`; \
+	if [ -n "$$PORT_PID" ]; then \
+		echo "Port $(PORT) is already in use by process $$PORT_PID"; \
+		echo "Killing process $$PORT_PID to free up the port..."; \
+		kill -9 $$PORT_PID 2>/dev/null || true; \
+		sleep 1; \
+		echo "✓ Port $(PORT) freed"; \
+	fi
 	@echo "Starting SenseVoice API in background on CPU (port $(PORT))..."
 	@echo "Log file: $(LOG_FILE)"
 	@nohup sh -c 'SENSEVOICE_DEVICE=$(DEVICE) PORT=$(PORT) $(PYTHON) -u $(API_FILE)' > $(LOG_FILE) 2>&1 & echo $$! > $(PID_FILE)
@@ -52,6 +61,15 @@ start-gpu:
 		echo "SenseVoice API is already running (PID: `cat $(PID_FILE)`)"; \
 		echo "Use 'make stop' to stop it first"; \
 		exit 1; \
+	fi
+	@# Check if port is already in use and kill the process using it
+	@PORT_PID=`lsof -ti :$(PORT) 2>/dev/null`; \
+	if [ -n "$$PORT_PID" ]; then \
+		echo "Port $(PORT) is already in use by process $$PORT_PID"; \
+		echo "Killing process $$PORT_PID to free up the port..."; \
+		kill -9 $$PORT_PID 2>/dev/null || true; \
+		sleep 1; \
+		echo "✓ Port $(PORT) freed"; \
 	fi
 	@echo "Starting SenseVoice API in background on GPU (port $(PORT))..."
 	@echo "Log file: $(LOG_FILE)"
@@ -131,6 +149,15 @@ webui-start:
 		echo "SenseVoice WebUI is already running (PID: `cat $(WEBUI_PID_FILE)`)"; \
 		echo "Use 'make webui-stop' to stop it first"; \
 		exit 1; \
+	fi
+	@# Check if port is already in use and kill the process using it
+	@WEBUI_PORT_PID=`lsof -ti :$(WEBUI_PORT) 2>/dev/null`; \
+	if [ -n "$$WEBUI_PORT_PID" ]; then \
+		echo "Port $(WEBUI_PORT) is already in use by process $$WEBUI_PORT_PID"; \
+		echo "Killing process $$WEBUI_PORT_PID to free up the port..."; \
+		kill -9 $$WEBUI_PORT_PID 2>/dev/null || true; \
+		sleep 1; \
+		echo "✓ Port $(WEBUI_PORT) freed"; \
 	fi
 	@echo "Starting SenseVoice WebUI in background on port $(WEBUI_PORT)..."
 	@echo "Log file: $(WEBUI_LOG_FILE)"

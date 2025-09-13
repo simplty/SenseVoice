@@ -110,6 +110,7 @@ parse_compose_config() {
     # 解析端口映射 - 从原始docker-compose.yml文件解析
     # 更简单直接的方法：直接搜索端口映射模式
     local raw_port_mapping=$(grep -E "^\s*-\s*\"[0-9]+:[0-9]+\"" "$COMPOSE_FILE" | head -n 1 | sed 's/.*"\([0-9]*:[0-9]*\)".*/\1/')
+    PORT_PARSED_SUCCESSFULLY="true"
     
     if [[ -n "$raw_port_mapping" ]]; then
         PORT=$(echo "$raw_port_mapping" | cut -d':' -f1)
@@ -122,7 +123,8 @@ parse_compose_config() {
             log_debug "从config输出解析到发布端口: $published_port"
         else
             PORT="8000"  # 默认端口
-            log_warning "无法解析端口，使用默认端口: 8000"
+            PORT_PARSED_SUCCESSFULLY="false"
+            log_warning "无法解析端口配置，将跳过健康检查"
         fi
     fi
     
@@ -455,15 +457,10 @@ add_common_volumes() {
 # 健康检查
 health_check() {
     # 检查端口是否解析成功
-    if [[ "$PORT" == "8000" && "$HEALTH_CHECK_URL" == *"localhost:8000"* ]]; then
-        # 检查是否是因为无法解析端口而使用的默认值
-        local has_port_mapping=$(grep -E "^\s*-\s*\"[0-9]+:[0-9]+\"" "$COMPOSE_FILE" 2>/dev/null)
-        if [[ -n "$has_port_mapping" ]]; then
-            log_warning "无法解析端口映射，跳过健康检查"
-            log_info "检测到端口映射配置存在，但解析失败"
-            log_info "请手动检查服务状态：docker-compose ps"
-            return 0
-        fi
+    if [[ "$PORT_PARSED_SUCCESSFULLY" == "false" ]]; then
+        log_warning "端口配置解析失败，跳过健康检查"
+        log_info "建议手动检查服务状态：docker-compose ps"
+        return 0
     fi
     
     log_info "执行健康检查..."

@@ -30,6 +30,7 @@ services:
       - ./models:/app/models
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./auth_config.yaml:/app/auth_config.yaml
     
     # Resource limits (optional)
     # deploy:

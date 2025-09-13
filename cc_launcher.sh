@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Claude Code Launcher Script
-# Version: 2.2.25
+# Version: 2.2.26
 
 # 版本信息
-VERSION="2.2.25"
+VERSION="2.2.26"
 REMOTE_SCRIPT_URL="http://tfs.sthnext.com/cc/cc_launcher.sh"
 
 # 版本管理函数
@@ -2025,11 +2025,17 @@ run_claude() {
     local claude_args="$*"
     
     if detect_os; then
-        # Linux系统，检查sudo是否可用
-        if command -v sudo >/dev/null 2>&1; then
+        # Linux系统，检查是否需要sudo
+        if [[ $EUID -eq 0 ]]; then
+            # 已经是root用户，不需要sudo
+            print_info "检测到Linux系统，以root权限执行Claude Code"
+            claude $claude_args
+        elif command -v sudo >/dev/null 2>&1; then
+            # 非root用户且sudo可用
             print_info "检测到Linux系统，使用sudo执行Claude Code"
             sudo claude $claude_args
         else
+            # 非root用户且sudo不可用
             print_warning "检测到Linux系统，但sudo不可用，直接执行Claude Code"
             claude $claude_args
         fi

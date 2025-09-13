@@ -9,8 +9,9 @@ import os
 import re
 import logging
 import json
+import yaml
 from datetime import datetime
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request, Header
 from fastapi.responses import JSONResponse, PlainTextResponse
 from typing import Optional, Literal
 from io import BytesIO
@@ -25,6 +26,17 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# Load authentication configuration
+auth_config = {}
+try:
+    with open("auth_config.yaml", "r", encoding="utf-8") as f:
+        auth_config = yaml.safe_load(f)
+    logger.info("Authentication configuration loaded successfully")
+except FileNotFoundError:
+    logger.warning("Authentication config file not found, authentication disabled")
+except Exception as e:
+    logger.error(f"Error loading authentication config: {e}")
 
 # Initialize model
 model_dir = "./models/SenseVoiceSmall"
@@ -78,6 +90,33 @@ LANGUAGE_MAP = {
 ResponseFormat = Literal["json", "text", "srt", "verbose_json", "vtt"]
 
 
+def verify_bearer_token(authorization: Optional[str] = Header(None)) -> str:
+    """验证 Bearer Token，返回用户名称"""
+    # 如果认证配置为空或认证被禁用，则跳过验证
+    if not auth_config or not auth_config.get("auth", {}).get("settings", {}).get("enabled", True):
+        return "anonymous"
+    
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header required")
+    
+    # 检查 Bearer 前缀
+    token_prefix = auth_config.get("auth", {}).get("settings", {}).get("token_prefix", "Bearer")
+    if not authorization.startswith(f"{token_prefix} "):
+        raise HTTPException(status_code=401, detail=f"Invalid authorization format, expected '{token_prefix} <token>'")
+    
+    # 提取 token
+    token = authorization[len(f"{token_prefix} "):]
+    
+    # 检查 token 是否在配置的 tokens 中
+    users = auth_config.get("auth", {}).get("users", {})
+    for user_name, tokens in users.items():
+        if token in tokens:
+            logger.info(f"Token validated for user: {user_name}")
+            return user_name
+    
+    raise HTTPException(status_code=401, detail="Invalid token")
+
+
 def clean_transcription_text(text: str) -> str:
     """Remove special tokens from transcription text"""
     # Remove all special tokens like <|zh|>, <|NEUTRAL|>, etc.
@@ -115,7 +154,8 @@ async def create_transcription(
     prompt: Optional[str] = Form(default=None, description="Optional prompt (not used by SenseVoice)"),
     response_format: ResponseFormat = Form(default="json", description="Response format"),
     temperature: Optional[float] = Form(default=0, description="Temperature (not used by SenseVoice)"),
-    timestamp_granularities: Optional[str] = Form(default=None, description="Timestamp granularities")
+    timestamp_granularities: Optional[str] = Form(default=None, description="Timestamp granularities"),
+    authorization: Optional[str] = Header(None)
 ):
     """
     Transcribe audio using SenseVoice model
@@ -123,8 +163,17 @@ async def create_transcription(
     Compatible with OpenAI's Whisper API format
     """
     try:
-        # Log request parameters
-        logger.info(f"Transcription request: filename={file.filename}, size={file.size if hasattr(file, 'size') else 'unknown'}, "
+        # 验证 Bearer Token 并获取用户名称
+        username = verify_bearer_token(authorization)
+        
+        # 获取token用于日志记录（显示完整token）
+        token_for_log = "anonymous"
+        if authorization and authorization.startswith("Bearer "):
+            token_for_log = authorization[7:]  # Remove "Bearer " prefix
+        
+        # Log request parameters including token and username
+        logger.info(f"Transcription request from user: {username}, token: {token_for_log}, "
+                   f"filename={file.filename}, size={file.size if hasattr(file, 'size') else 'unknown'}, "
                    f"language={language}, response_format={response_format}")
         
         # Read audio file
@@ -178,24 +227,24 @@ async def create_transcription(
         detected_language = detect_language_from_text(raw_text) if lang == "auto" else lang
         
         # Log the transcription result
-        logger.info(f"Transcription result: detected_language={detected_language}, "
+        logger.info(f"Transcription result for user: {username}, detected_language={detected_language}, "
                    f"text_length={len(clean_text)}, text_preview={clean_text[:100]}...")
         
         # Format response based on response_format
         if response_format == "text":
-            logger.info(f"Returning text response: {clean_text}")
+            logger.info(f"Returning text response for user: {username}")
             return PlainTextResponse(content=clean_text)
         
         elif response_format == "srt":
             # Simple SRT format (without timestamps for now)
             srt_content = f"1\n00:00:00,000 --> 00:00:10,000\n{clean_text}\n"
-            logger.info(f"Returning SRT response")
+            logger.info(f"Returning SRT response for user: {username}")
             return PlainTextResponse(content=srt_content, media_type="text/plain")
         
         elif response_format == "vtt":
             # Simple VTT format (without timestamps for now)
             vtt_content = f"WEBVTT\n\n00:00:00.000 --> 00:00:10.000\n{clean_text}\n"
-            logger.info(f"Returning VTT response")
+            logger.info(f"Returning VTT response for user: {username}")
             return PlainTextResponse(content=vtt_content, media_type="text/vtt")
         
         elif response_format == "verbose_json":
@@ -218,7 +267,7 @@ async def create_transcription(
                     "no_speech_prob": 0.0
                 }]
             }
-            logger.info(f"Returning verbose JSON response: {json.dumps(response_data, ensure_ascii=False)[:500]}...")
+            logger.info(f"Returning verbose JSON response for user: {username}: {json.dumps(response_data, ensure_ascii=False)[:500]}...")
             return JSONResponse(response_data)
         
         else:  # json (default)
@@ -227,11 +276,23 @@ async def create_transcription(
                 "language": detected_language,
                 "model": "sensevoice-small"
             }
-            logger.info(f"Returning JSON response: {json.dumps(response_data, ensure_ascii=False)}")
+            logger.info(f"Returning JSON response for user: {username}: {json.dumps(response_data, ensure_ascii=False)}")
+            
+            # 添加格式化的用户转录结果日志
+            logger.info("-------------------")
+            logger.info(f"|{username}: {clean_text}")
+            logger.info("-------------------")
+            
             return JSONResponse(response_data)
             
     except Exception as e:
-        logger.error(f"Transcription error: {str(e)}", exc_info=True)
+        # Try to get username for error logging, but don't fail if token is invalid
+        try:
+            username_for_error = verify_bearer_token(authorization)
+        except:
+            username_for_error = "unknown"
+        
+        logger.error(f"Transcription error for user: {username_for_error}: {str(e)}", exc_info=True)
         if "load" in str(e).lower() or "audio" in str(e).lower():
             raise HTTPException(status_code=400, detail="Invalid audio file format")
         raise HTTPException(status_code=500, detail=str(e))
@@ -243,15 +304,22 @@ async def create_translation(
     model: str = Form(default="whisper-1", description="Model name (for compatibility)"),
     prompt: Optional[str] = Form(default=None, description="Optional prompt"),
     response_format: ResponseFormat = Form(default="json", description="Response format"),
-    temperature: Optional[float] = Form(default=0, description="Temperature")
+    temperature: Optional[float] = Form(default=0, description="Temperature"),
+    authorization: Optional[str] = Header(None)
 ):
     """
     Translate audio to English (currently just transcribes)
     Note: SenseVoice doesn't do translation, only transcription
     """
+    # 验证 Bearer Token 并获取用户名称
+    username = verify_bearer_token(authorization)
+    
+    # 记录请求信息，包含用户名称
+    logger.info(f"Translation request from user: {username}, filename={file.filename}, size={file.size if hasattr(file, 'size') else 'unknown'}")
+    
     # For now, just transcribe with language set to auto
     # Real translation would require a separate translation model
-    return await create_transcription(
+    result = await create_transcription(
         file=file,
         model=model,
         language="auto",
@@ -260,6 +328,11 @@ async def create_translation(
         temperature=temperature,
         timestamp_granularities=None
     )
+    
+    # 记录响应信息，包含用户名称
+    logger.info(f"Translation response for user: {username} completed successfully")
+    
+    return result
 
 
 @app.get("/v1/models")
