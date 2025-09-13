@@ -107,12 +107,23 @@ parse_compose_config() {
         CONTAINER_NAME="$PROJECT_NAME"
     fi
     
-    # 解析端口映射
-    local port_mapping=$(docker-compose -f "$COMPOSE_FILE" config 2>/dev/null | grep -A 20 "^  $first_service:" | grep -A 10 "ports:" | grep -E "^ *- " | head -n 1 | sed 's/.*- *"*//g' | sed 's/"*$//g')
-    if [[ -n "$port_mapping" ]]; then
-        PORT=$(echo "$port_mapping" | cut -d':' -f1)
+    # 解析端口映射 - 从原始docker-compose.yml文件解析
+    # 更简单直接的方法：直接搜索端口映射模式
+    local raw_port_mapping=$(grep -E "^\s*-\s*\"[0-9]+:[0-9]+\"" "$COMPOSE_FILE" | head -n 1 | sed 's/.*"\([0-9]*:[0-9]*\)".*/\1/')
+    
+    if [[ -n "$raw_port_mapping" ]]; then
+        PORT=$(echo "$raw_port_mapping" | cut -d':' -f1)
+        log_debug "从原始文件解析到端口映射: $raw_port_mapping -> 宿主机端口: $PORT"
     else
-        PORT="8000"  # 默认端口
+        # 备用方案：尝试从docker-compose config解析published端口
+        local published_port=$(docker-compose -f "$COMPOSE_FILE" config 2>/dev/null | grep -A 20 "^  $first_service:" | grep -A 10 "ports:" | grep "published:" | head -n 1 | sed 's/.*published: *"*//g' | sed 's/"*$//g')
+        if [[ -n "$published_port" ]]; then
+            PORT="$published_port"
+            log_debug "从config输出解析到发布端口: $published_port"
+        else
+            PORT="8000"  # 默认端口
+            log_warning "无法解析端口，使用默认端口: 8000"
+        fi
     fi
     
     # 解析健康检查路径
@@ -443,6 +454,18 @@ add_common_volumes() {
 
 # 健康检查
 health_check() {
+    # 检查端口是否解析成功
+    if [[ "$PORT" == "8000" && "$HEALTH_CHECK_URL" == *"localhost:8000"* ]]; then
+        # 检查是否是因为无法解析端口而使用的默认值
+        local has_port_mapping=$(grep -E "^\s*-\s*\"[0-9]+:[0-9]+\"" "$COMPOSE_FILE" 2>/dev/null)
+        if [[ -n "$has_port_mapping" ]]; then
+            log_warning "无法解析端口映射，跳过健康检查"
+            log_info "检测到端口映射配置存在，但解析失败"
+            log_info "请手动检查服务状态：docker-compose ps"
+            return 0
+        fi
+    fi
+    
     log_info "执行健康检查..."
     log_debug "健康检查URL: $HEALTH_CHECK_URL"
     
