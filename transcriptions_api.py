@@ -10,6 +10,7 @@ import re
 import logging
 import json
 import yaml
+import httpx
 from datetime import datetime
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Request, Header
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -17,7 +18,10 @@ from typing import Optional, Literal
 from io import BytesIO
 import torchaudio
 from model import SenseVoiceSmall
-from funasr.utils.postprocess_utils import rich_transcription_postprocess
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -26,6 +30,27 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# Load LLM configuration from environment variables
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "4.0"))
+LLM_SYSTEM_PROMPT = os.getenv("LLM_SYSTEM_PROMPT", "你是一个专业的语音识别结果校对助手。你的任务是纠正语音识别结果中的错误，包括但不限于：标点符号、专业术语、语法问题、同音异义词等。请保持原意不变，只进行必要的纠正。")
+LLM_USER_PROMPT = os.getenv("LLM_USER_PROMPT", "请纠正以下语音识别结果中的错误，只返回纠正后的文本，不要添加任何解释或说明：\n\n{text}")
+
+# Check if LLM post-processing is enabled
+LLM_ENABLED_CONFIG = os.getenv("LLM_ENABLED", "false").lower() in ("true", "1", "yes", "on")
+LLM_ENABLED = LLM_ENABLED_CONFIG and bool(LLM_API_KEY)
+if LLM_ENABLED:
+    logger.info(f"LLM post-processing enabled. Using model: {LLM_MODEL}")
+else:
+    if not LLM_ENABLED_CONFIG:
+        logger.info("LLM post-processing disabled. LLM_ENABLED is set to false.")
+    elif not LLM_API_KEY:
+        logger.info("LLM post-processing disabled. No API key configured.")
+    else:
+        logger.info("LLM post-processing disabled.")
 
 # Load authentication configuration
 auth_config = {}
@@ -134,6 +159,90 @@ def detect_language_from_text(text: str) -> str:
     return "unknown"
 
 
+async def post_process_with_llm(text: str) -> str:
+    """Post-process ASR result with LLM to correct errors"""
+    if not LLM_ENABLED or not text.strip():
+        return text
+    
+    try:
+        async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
+            headers = {
+                "Authorization": f"Bearer {LLM_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            # Format user prompt with text placeholder
+            user_content = LLM_USER_PROMPT.format(text=text)
+            
+            payload = {
+                "model": LLM_MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": LLM_SYSTEM_PROMPT
+                    },
+                    {
+                        "role": "user", 
+                        "content": user_content
+                    }
+                ],
+                "temperature": 0.1,
+                "max_tokens": len(text) * 2 + 100
+            }
+            
+            response = await client.post(
+                f"{LLM_BASE_URL}/chat/completions",
+                headers=headers,
+                json=payload
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                corrected_text = result['choices'][0]['message']['content'].strip()
+                logger.info(f"LLM API call successful. Model: {LLM_MODEL}, Original length: {len(text)}, Corrected length: {len(corrected_text)}")
+                return corrected_text
+            else:
+                error_details = {
+                    "status_code": response.status_code,
+                    "reason": response.reason_phrase,
+                    "headers": dict(response.headers),
+                    "response_body": response.text,
+                    "request_url": str(response.url),
+                    "model": LLM_MODEL,
+                    "base_url": LLM_BASE_URL
+                }
+                logger.error(f"LLM API error: {response.status_code} - {response.reason_phrase}")
+                logger.error(f"LLM error details: {json.dumps(error_details, indent=2, ensure_ascii=False)}")
+                return text
+    
+    except httpx.TimeoutException as e:
+        logger.error(f"LLM post-processing timeout: {str(e)}")
+        logger.error(f"Timeout details: timeout={LLM_TIMEOUT}s, model={LLM_MODEL}, base_url={LLM_BASE_URL}")
+        return text
+    except httpx.ConnectError as e:
+        logger.error(f"LLM post-processing connection error: {str(e)}")
+        logger.error(f"Connection details: model={LLM_MODEL}, base_url={LLM_BASE_URL}")
+        return text
+    except httpx.HTTPStatusError as e:
+        logger.error(f"LLM post-processing HTTP error: {str(e)}")
+        logger.error(f"HTTP error details: status={e.response.status_code}, model={LLM_MODEL}, base_url={LLM_BASE_URL}")
+        return text
+    except json.JSONDecodeError as e:
+        logger.error(f"LLM post-processing JSON decode error: {str(e)}")
+        logger.error(f"JSON error details: model={LLM_MODEL}, base_url={LLM_BASE_URL}")
+        return text
+    except KeyError as e:
+        logger.error(f"LLM post-processing response format error: {str(e)}")
+        logger.error(f"Response format error details: missing key={str(e)}, model={LLM_MODEL}, base_url={LLM_BASE_URL}")
+        return text
+    except Exception as e:
+        logger.error(f"LLM post-processing failed with unexpected error: {str(e)}")
+        logger.error(f"Unexpected error details: type={type(e).__name__}, model={LLM_MODEL}, base_url={LLM_BASE_URL}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        return text
+
+
 @app.get("/")
 async def root():
     """API information"""
@@ -222,6 +331,23 @@ async def create_transcription(
         
         # Clean text
         clean_text = clean_transcription_text(raw_text)
+        
+        # Post-process with LLM if enabled
+        if LLM_ENABLED:
+            logger.info(f"Post-processing text with LLM for user: {username}")
+            original_text = clean_text
+            clean_text = await post_process_with_llm(clean_text)
+            
+            # Log LLM correction details
+            if original_text != clean_text:
+                logger.info("-------------------")
+                logger.info(f"| LLM correction applied for user: {username}")
+                logger.info(f"| Model: {LLM_MODEL}")
+                logger.info(f"| Original: {original_text}")
+                logger.info(f"| Corrected: {clean_text}")
+                logger.info("-------------------")
+            else:
+                logger.info(f"LLM processing completed, no changes made for user: {username}")
         
         # Detect language if auto
         detected_language = detect_language_from_text(raw_text) if lang == "auto" else lang
